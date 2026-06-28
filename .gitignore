@@ -1,0 +1,12 @@
+venv/
+dataset/
+images/
+reports/
+notebooks/
+__pycache__/
+*.pyc
+
+train.py
+predict.py
+preprocessing.py
+model.py
