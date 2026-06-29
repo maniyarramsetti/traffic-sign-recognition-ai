@@ -1,9 +1,9 @@
 streamlit==1.36.0
-tensorflow==2.10.1
+tensorflow==2.13.0
 numpy==1.24.3
-opencv-python-headless==4.10.0.84
-Pillow
-pandas
-plotly
-streamlit-option-menu
-reportlab
+opencv-python-headless==4.8.1.78
+Pillow==10.4.0
+pandas==2.0.3
+plotly==5.22.0
+streamlit-option-menu==0.3.13
+reportlab==4.2.2
