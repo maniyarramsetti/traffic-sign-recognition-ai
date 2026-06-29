@@ -18,4 +18,8 @@ classes = {
 }
 
 def get_model():
-    return load_model("models/traffic_sign_model.h5")
+    model = load_model(
+        "models/traffic_sign_model.h5",
+        compile=False
+    )
+    return model

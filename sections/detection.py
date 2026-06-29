@@ -9,56 +9,36 @@ import plotly.graph_objects as go
 from datetime import datetime
 from utils.model_loader import get_model, classes
 
+# ---------------- LOAD MODEL ----------------
 model = get_model()
 
-# ---------------- ALERT CATEGORIES ----------------
-HIGH_RISK = [
-    "Stop",
-    "No entry",
-    "Pedestrians",
-    "Children crossing"
-]
+# ---------------- RISK CATEGORIES ----------------
+HIGH_RISK = ["Stop", "No entry", "Pedestrians", "Children crossing"]
 
-MEDIUM_RISK = [
-    "Road work",
-    "Slippery road",
-    "Traffic signals"
-]
+MEDIUM_RISK = ["Road work", "Slippery road", "Traffic signals"]
 
+# ---------------- SESSION STATE ----------------
 if "history" not in st.session_state:
     st.session_state.history = []
 
 if "last_spoken" not in st.session_state:
     st.session_state.last_spoken = ""
 
-
-# ---------------- VOICE ----------------
+# ---------------- TEXT TO SPEECH ----------------
 def speak_alert(message):
     js = f"""
     <script>
-    const msg = new SpeechSynthesisUtterance("{message}");
-    msg.rate = 1;
-    msg.pitch = 1;
-    window.speechSynthesis.speak(msg);
+        const msg = new SpeechSynthesisUtterance("{message}");
+        msg.rate = 1;
+        msg.pitch = 1;
+        window.speechSynthesis.speak(msg);
     </script>
     """
     components.html(js, height=0)
 
-
 def generate_voice_message(label):
-    if label == "Stop":
-        return "Warning. Stop sign detected."
-    elif label == "No entry":
-        return "Alert. No entry sign detected."
-    elif label == "Pedestrians":
-        return "Caution. Pedestrian crossing ahead."
-    elif label == "Children crossing":
-        return "Warning. Children crossing ahead."
-    else:
-        return f"{label} detected."
+    return f"{label} detected."
 
-
-# ---------------- ALERT ----------------
 def get_alert(label):
     if label in HIGH_RISK:
         return "HIGH RISK", "🚨", "#ff003c", "Immediate attention required"
@@ -67,31 +47,39 @@ def get_alert(label):
     else:
         return "INFO", "ℹ️", "#00cc66", "Informational traffic sign"
 
-
-# ---------------- IMAGE PREDICTION ----------------
+# ---------------- IMAGE PREPROCESSING (FIXED) ----------------
 def predict_image(image):
     img = np.array(image)
+
+    # IMPORTANT FIX: ensure correct format
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    # resize EXACTLY like training
     img = cv2.resize(img, (32, 32))
+
+    # normalize
     img = img.astype("float32") / 255.0
+
+    # add batch dimension
     img = np.expand_dims(img, axis=0)
 
     pred = model.predict(img, verbose=0)
+
     idx = np.argmax(pred)
-    conf = np.max(pred) * 100
+    conf = float(np.max(pred) * 100)
 
     return pred, idx, conf
 
-
-# ---------------- SHOW PREDICTION ----------------
+# ---------------- SHOW RESULTS ----------------
 def show_prediction(image, pred, idx, conf):
     label = classes[idx]
 
-    voice_message = generate_voice_message(label)
+    # voice only once per prediction
     if st.session_state.last_spoken != label:
-        speak_alert(voice_message)
+        speak_alert(f"{label} detected.")
         st.session_state.last_spoken = label
 
+    # save history
     st.session_state.history.insert(0, {
         "time": datetime.now().strftime("%H:%M:%S"),
         "label": label,
@@ -129,8 +117,7 @@ def show_prediction(image, pred, idx, conf):
         </div>
         """, unsafe_allow_html=True)
 
-    st.write("")
-
+    # confidence gauge
     gauge = go.Figure(go.Indicator(
         mode="gauge+number",
         value=conf,
@@ -140,11 +127,12 @@ def show_prediction(image, pred, idx, conf):
 
     st.plotly_chart(gauge, use_container_width=True)
 
+    # top predictions
     top_idx = pred[0].argsort()[-5:][::-1]
 
     df = pd.DataFrame({
         "Class": [classes[i] for i in top_idx],
-        "Probability": [pred[0][i] * 100 for i in top_idx]
+        "Probability": [float(pred[0][i] * 100) for i in top_idx]
     })
 
     fig = px.bar(
@@ -157,12 +145,11 @@ def show_prediction(image, pred, idx, conf):
 
     st.plotly_chart(fig, use_container_width=True)
 
-
 # ---------------- HISTORY ----------------
 def show_history():
     st.markdown("## Recent Detections")
 
-    if len(st.session_state.history) == 0:
+    if not st.session_state.history:
         st.info("No detections yet.")
         return
 
@@ -174,8 +161,7 @@ def show_history():
         </div>
         """, unsafe_allow_html=True)
 
-
-# ---------------- MAIN PAGE ----------------
+# ---------------- MAIN ----------------
 def show():
     st.markdown(
         '<div class="hero-title">Detection</div>',
@@ -187,18 +173,10 @@ def show():
     c2.info("CNN Active")
     c3.warning("CPU Mode")
 
-    st.write("")
-
-    tab1, tab2 = st.tabs([
-        "📁 Upload Image",
-        "📷 Camera Capture"
-    ])
+    tab1, tab2 = st.tabs(["📁 Upload Image", "📷 Camera Capture"])
 
     with tab1:
-        uploaded = st.file_uploader(
-            "Upload Traffic Sign",
-            type=["jpg", "jpeg", "png"]
-        )
+        uploaded = st.file_uploader("Upload Traffic Sign", type=["jpg", "jpeg", "png"])
 
         if uploaded:
             image = Image.open(uploaded).convert("RGB")
@@ -213,5 +191,4 @@ def show():
             pred, idx, conf = predict_image(image)
             show_prediction(image, pred, idx, conf)
 
-    st.write("")
     show_history()
