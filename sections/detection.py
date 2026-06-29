@@ -9,36 +9,55 @@ import plotly.graph_objects as go
 from datetime import datetime
 from utils.model_loader import get_model, classes
 
+# ---------------- SAFE SESSION INIT ----------------
+if "history" not in st.session_state:
+    st.session_state["history"] = []
+
+if "last_spoken" not in st.session_state:
+    st.session_state["last_spoken"] = ""
+
 # ---------------- LOAD MODEL ----------------
 model = get_model()
 
-# ---------------- RISK CATEGORIES ----------------
-HIGH_RISK = ["Stop", "No entry", "Pedestrians", "Children crossing"]
+# ---------------- ALERT CATEGORIES ----------------
+HIGH_RISK = [
+    "Stop",
+    "No entry",
+    "Pedestrians",
+    "Children crossing"
+]
 
-MEDIUM_RISK = ["Road work", "Slippery road", "Traffic signals"]
+MEDIUM_RISK = [
+    "Road work",
+    "Slippery road",
+    "Traffic signals"
+]
 
-# ---------------- SESSION STATE ----------------
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-if "last_spoken" not in st.session_state:
-    st.session_state.last_spoken = ""
-
-# ---------------- TEXT TO SPEECH ----------------
+# ---------------- VOICE ----------------
 def speak_alert(message):
     js = f"""
     <script>
-        const msg = new SpeechSynthesisUtterance("{message}");
-        msg.rate = 1;
-        msg.pitch = 1;
-        window.speechSynthesis.speak(msg);
+    const msg = new SpeechSynthesisUtterance("{message}");
+    msg.rate = 1;
+    msg.pitch = 1;
+    window.speechSynthesis.speak(msg);
     </script>
     """
     components.html(js, height=0)
 
 def generate_voice_message(label):
-    return f"{label} detected."
+    if label == "Stop":
+        return "Warning. Stop sign detected."
+    elif label == "No entry":
+        return "Alert. No entry sign detected."
+    elif label == "Pedestrians":
+        return "Caution. Pedestrian crossing ahead."
+    elif label == "Children crossing":
+        return "Warning. Children crossing ahead."
+    else:
+        return f"{label} detected."
 
+# ---------------- ALERT ----------------
 def get_alert(label):
     if label in HIGH_RISK:
         return "HIGH RISK", "🚨", "#ff003c", "Immediate attention required"
@@ -47,46 +66,36 @@ def get_alert(label):
     else:
         return "INFO", "ℹ️", "#00cc66", "Informational traffic sign"
 
-# ---------------- IMAGE PREPROCESSING (FIXED) ----------------
+# ---------------- IMAGE PREDICTION ----------------
 def predict_image(image):
     img = np.array(image)
-
-    # IMPORTANT FIX: ensure correct format
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-
-    # resize EXACTLY like training
     img = cv2.resize(img, (32, 32))
-
-    # normalize
     img = img.astype("float32") / 255.0
-
-    # add batch dimension
     img = np.expand_dims(img, axis=0)
 
     pred = model.predict(img, verbose=0)
-
     idx = np.argmax(pred)
-    conf = float(np.max(pred) * 100)
+    conf = np.max(pred) * 100
 
     return pred, idx, conf
 
-# ---------------- SHOW RESULTS ----------------
+# ---------------- SHOW PREDICTION ----------------
 def show_prediction(image, pred, idx, conf):
     label = classes[idx]
 
-    # voice only once per prediction
-    if st.session_state.last_spoken != label:
-        speak_alert(f"{label} detected.")
-        st.session_state.last_spoken = label
+    voice_message = generate_voice_message(label)
+    if st.session_state["last_spoken"] != label:
+        speak_alert(voice_message)
+        st.session_state["last_spoken"] = label
 
-    # save history
-    st.session_state.history.insert(0, {
+    st.session_state["history"].insert(0, {
         "time": datetime.now().strftime("%H:%M:%S"),
         "label": label,
         "confidence": round(conf, 2)
     })
 
-    st.session_state.history = st.session_state.history[:5]
+    st.session_state["history"] = st.session_state["history"][:5]
 
     level, icon, color, message = get_alert(label)
 
@@ -117,7 +126,6 @@ def show_prediction(image, pred, idx, conf):
         </div>
         """, unsafe_allow_html=True)
 
-    # confidence gauge
     gauge = go.Figure(go.Indicator(
         mode="gauge+number",
         value=conf,
@@ -127,12 +135,11 @@ def show_prediction(image, pred, idx, conf):
 
     st.plotly_chart(gauge, use_container_width=True)
 
-    # top predictions
     top_idx = pred[0].argsort()[-5:][::-1]
 
     df = pd.DataFrame({
         "Class": [classes[i] for i in top_idx],
-        "Probability": [float(pred[0][i] * 100) for i in top_idx]
+        "Probability": [pred[0][i] * 100 for i in top_idx]
     })
 
     fig = px.bar(
@@ -149,11 +156,14 @@ def show_prediction(image, pred, idx, conf):
 def show_history():
     st.markdown("## Recent Detections")
 
-    if not st.session_state.history:
+    if "history" not in st.session_state:
+        st.session_state["history"] = []
+
+    if len(st.session_state["history"]) == 0:
         st.info("No detections yet.")
         return
 
-    for item in st.session_state.history:
+    for item in st.session_state["history"]:
         st.markdown(f"""
         <div class='glass' style='margin-bottom:12px'>
             <b>{item['time']}</b><br>
@@ -161,7 +171,7 @@ def show_history():
         </div>
         """, unsafe_allow_html=True)
 
-# ---------------- MAIN ----------------
+# ---------------- MAIN PAGE ----------------
 def show():
     st.markdown(
         '<div class="hero-title">Detection</div>',
@@ -173,10 +183,18 @@ def show():
     c2.info("CNN Active")
     c3.warning("CPU Mode")
 
-    tab1, tab2 = st.tabs(["📁 Upload Image", "📷 Camera Capture"])
+    st.write("")
+
+    tab1, tab2 = st.tabs([
+        "📁 Upload Image",
+        "📷 Camera Capture"
+    ])
 
     with tab1:
-        uploaded = st.file_uploader("Upload Traffic Sign", type=["jpg", "jpeg", "png"])
+        uploaded = st.file_uploader(
+            "Upload Traffic Sign",
+            type=["jpg", "jpeg", "png"]
+        )
 
         if uploaded:
             image = Image.open(uploaded).convert("RGB")
@@ -191,4 +209,5 @@ def show():
             pred, idx, conf = predict_image(image)
             show_prediction(image, pred, idx, conf)
 
+    st.write("")
     show_history()
