@@ -7,9 +7,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
-import av
-
 from utils.model_loader import get_model, classes
 
 model = get_model()
@@ -33,12 +30,6 @@ if "history" not in st.session_state:
 
 if "last_spoken" not in st.session_state:
     st.session_state.last_spoken = ""
-
-if "live_prediction" not in st.session_state:
-    st.session_state.live_prediction = "Waiting..."
-
-if "live_confidence" not in st.session_state:
-    st.session_state.live_confidence = 0
 
 
 # ---------------- VOICE ----------------
@@ -70,11 +61,11 @@ def generate_voice_message(label):
 # ---------------- ALERT ----------------
 def get_alert(label):
     if label in HIGH_RISK:
-        return "HIGH RISK", "🚨", (0, 0, 255), "Immediate attention required"
+        return "HIGH RISK", "🚨", "#ff003c", "Immediate attention required"
     elif label in MEDIUM_RISK:
-        return "CAUTION", "⚠", (0, 165, 255), "Drive carefully"
+        return "CAUTION", "⚠️", "#ff9d00", "Drive carefully"
     else:
-        return "INFO", "ℹ", (0, 255, 0), "Informational traffic sign"
+        return "INFO", "ℹ️", "#00cc66", "Informational traffic sign"
 
 
 # ---------------- IMAGE PREDICTION ----------------
@@ -92,51 +83,7 @@ def predict_image(image):
     return pred, idx, conf
 
 
-# ---------------- LIVE VIDEO PROCESSOR ----------------
-class LiveProcessor(VideoProcessorBase):
-    def recv(self, frame):
-        img = frame.to_ndarray(format="bgr24")
-
-        resized = cv2.resize(img, (32, 32))
-        normalized = resized.astype("float32") / 255.0
-        input_img = np.expand_dims(normalized, axis=0)
-
-        pred = model.predict(input_img, verbose=0)
-        idx = np.argmax(pred)
-        conf = float(np.max(pred) * 100)
-        label = classes[idx]
-
-        st.session_state.live_prediction = label
-        st.session_state.live_confidence = conf
-
-        level, icon, color, _ = get_alert(label)
-
-        cv2.rectangle(img, (20, 20), (620, 110), color, -1)
-
-        cv2.putText(
-            img,
-            f"{icon} {label}",
-            (40, 60),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.9,
-            (255, 255, 255),
-            2
-        )
-
-        cv2.putText(
-            img,
-            f"Confidence: {conf:.2f}%",
-            (40, 95),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (255, 255, 255),
-            2
-        )
-
-        return av.VideoFrame.from_ndarray(img, format="bgr24")
-
-
-# ---------------- NORMAL PREDICTION UI ----------------
+# ---------------- SHOW PREDICTION ----------------
 def show_prediction(image, pred, idx, conf):
     label = classes[idx]
 
@@ -153,7 +100,7 @@ def show_prediction(image, pred, idx, conf):
 
     st.session_state.history = st.session_state.history[:5]
 
-    level, icon, _, message = get_alert(label)
+    level, icon, color, message = get_alert(label)
 
     col1, col2 = st.columns([1, 1.4])
 
@@ -170,11 +117,19 @@ def show_prediction(image, pred, idx, conf):
         """, unsafe_allow_html=True)
 
         st.markdown(f"""
-        <div class='glass'>
+        <div style="
+            background:{color}20;
+            border:2px solid {color};
+            padding:20px;
+            border-radius:20px;
+            margin-top:15px;
+        ">
             <h2>{icon} {level}</h2>
             <p>{message}</p>
         </div>
         """, unsafe_allow_html=True)
+
+    st.write("")
 
     gauge = go.Figure(go.Indicator(
         mode="gauge+number",
@@ -203,6 +158,7 @@ def show_prediction(image, pred, idx, conf):
     st.plotly_chart(fig, use_container_width=True)
 
 
+# ---------------- HISTORY ----------------
 def show_history():
     st.markdown("## Recent Detections")
 
@@ -217,7 +173,9 @@ def show_history():
             {item['label']} — {item['confidence']}%
         </div>
         """, unsafe_allow_html=True)
-        # ---------------- MAIN PAGE ----------------
+
+
+# ---------------- MAIN PAGE ----------------
 def show():
     st.markdown(
         '<div class="hero-title">Detection</div>',
@@ -231,13 +189,11 @@ def show():
 
     st.write("")
 
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2 = st.tabs([
         "📁 Upload Image",
-        "📷 Camera Capture",
-        "🎥 Live Detection"
+        "📷 Camera Capture"
     ])
 
-    # ---------------- UPLOAD TAB ----------------
     with tab1:
         uploaded = st.file_uploader(
             "Upload Traffic Sign",
@@ -249,7 +205,6 @@ def show():
             pred, idx, conf = predict_image(image)
             show_prediction(image, pred, idx, conf)
 
-    # ---------------- CAMERA TAB ----------------
     with tab2:
         camera_image = st.camera_input("Capture Traffic Sign")
 
@@ -257,61 +212,6 @@ def show():
             image = Image.open(camera_image).convert("RGB")
             pred, idx, conf = predict_image(image)
             show_prediction(image, pred, idx, conf)
-
-    # ---------------- LIVE TAB ----------------
-    with tab3:
-        st.markdown("""
-        <div class='glass'>
-            <h2>🚘 Advanced HUD Live Detection</h2>
-            <p>Real-time AI webcam detection with ADAS-style dashboard.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.write("")
-
-        webrtc_streamer(
-            key="traffic-live-detection",
-            video_processor_factory=LiveProcessor,
-            media_stream_constraints={
-                "video": True,
-                "audio": False
-            }
-        )
-
-        st.write("")
-
-        # Live dashboard
-        pred_label = st.session_state.live_prediction
-        pred_conf = st.session_state.live_confidence
-
-        level, icon, _, message = get_alert(pred_label)
-
-        d1, d2, d3 = st.columns(3)
-
-        with d1:
-            st.metric("Live Prediction", pred_label)
-
-        with d2:
-            st.metric("Confidence", f"{pred_conf:.2f}%")
-
-        with d3:
-            st.metric("Alert Level", level)
-
-        st.markdown(f"""
-        <div class='glass'>
-            <h2>{icon} {level}</h2>
-            <p>{message}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        live_gauge = go.Figure(go.Indicator(
-            mode="gauge+number",
-            value=pred_conf,
-            title={'text': "Live Confidence"},
-            gauge={'axis': {'range': [0, 100]}}
-        ))
-
-        st.plotly_chart(live_gauge, use_container_width=True)
 
     st.write("")
     show_history()
