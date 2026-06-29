@@ -6,3 +6,6 @@ Pillow
 pandas
 plotly
 streamlit-option-menu
+reportlab
+streamlit-webrtc
+av
