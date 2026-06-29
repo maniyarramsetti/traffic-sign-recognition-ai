@@ -1,0 +1,5 @@
+services:
+  - type: web
+    name: traffic-sign-ai
+    env: docker
+    plan: free
